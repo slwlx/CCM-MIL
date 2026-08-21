@@ -1,0 +1,15 @@
+torch==2.0.1
+torchvision==0.15.2
+torchaudio==2.0.2
+packaging
+causal-conv1d==1.1.1
+scikit-survival==0.22.2
+pandas==2.2.1
+tensorboardx
+h5py
+wandb
+tensorboard
+lifelines
+numpy
+scikit-learn
+lifelines
