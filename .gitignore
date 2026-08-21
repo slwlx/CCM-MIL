@@ -9,7 +9,14 @@ dist/
 build/
 
 # Data & experiments (large files)
-dataset/
+# Keep Python source files in dataset/ but ignore data files
+dataset/*.pt
+dataset/*.pth
+dataset/*.h5
+dataset/*.pkl
+dataset/*.csv
+dataset/*.json
+dataset/*.txt
 experiments/
 results/
 *.pkl
