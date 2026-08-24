@@ -1,10 +1,11 @@
 """
-Clinical Cascade Mamba (CCM) for WSI Survival Analysis — v3.2 (LSMR-default).
-Logits-Space Mean Residual (LSMR) as the default Stage-2 enhancement:
-  - Keep original attention aggregation in feature space.
-  - Add MeanMIL-style patch_logits.mean() residual in logits space.
-  - AMALA (feature-space adaptive gate) removed based on ablation results.
-Supports dict input: {'patch_features': (N,D), 'patch_coords': (N,2)}
+CCM-MIL (Coordinate-Cascade Mamba) for WSI survival analysis.
+
+Stage 2 uses logits-space mean residual (LSMR) fusion: the attention-pooled
+prediction is combined with a MeanMIL-style patch-logits mean through a
+learned gate.
+
+Input: dict {'patch_features': (N, D), 'patch_coords': (N, 2)}.
 """
 import math
 import torch
@@ -28,19 +29,15 @@ def initialize_weights(module):
             nn.init.constant_(m.weight, 1.0)
 
 
-# ===================== Helper functions =====================
+# Helpers
 def _scatter_to_grid(features, coords, grid_size=None, grid_mode='square_norm'):
-    """
-    Scatter patch features onto a 2D pseudo-grid using normalized coordinates.
-    grid_mode:
-      - 'square_norm' (default, v3 legacy): isotropic square grid H=W.
-      - 'aspect' (v5 backport): aspect-preserving rectangular grid.
-    Returns:
-        feature_map: (1, D, H, W)
-        mask:        (1, 1, H, W)
-        grid_shape:  (H, W) tuple
-        (grid_h, grid_w): tuple of (N,) indices
-        coords_norm: (N, 2) in [0, 1]
+    """Scatter patch features onto a 2D pseudo-grid using normalized coordinates.
+
+    grid_mode='square_norm' gives an isotropic square grid (H = W);
+    'aspect' gives an aspect-preserving rectangular grid.
+
+    Returns feature_map (1, D, H, W), mask (1, 1, H, W), grid_shape (H, W),
+    per-patch grid indices (grid_h, grid_w), and coords_norm (N, 2) in [0, 1].
     """
     N, D = features.shape
     c_min = coords.min(dim=0, keepdim=True).values
@@ -57,7 +54,7 @@ def _scatter_to_grid(features, coords, grid_size=None, grid_mode='square_norm'):
         grid_w = (c_norm[:, 0] * (W - 1)).long().clamp(0, W - 1)
 
     elif grid_mode == 'aspect':
-        # Backport from v5 MODULE M1: aspect-preserving rectangular grid.
+        # Aspect-preserving rectangular grid.
         # Target cell count M = ceil(1.2 * N), min 64.
         M = max(64, int(math.ceil(N * 1.2)))
         Rx = float(c_range[0, 0].item())
@@ -67,7 +64,7 @@ def _scatter_to_grid(features, coords, grid_size=None, grid_mode='square_norm'):
         W = max(8, W)
         H = int(math.ceil(M / W))
         H = max(8, H)
-        # Cap cells by analytic isotropic scaling (v5 exact logic).
+        # Cap total cells by isotropic downscaling.
         if H * W > 65536:
             s = math.sqrt((H * W) / 65536)
             H = max(8, int(math.floor(H / s)))
@@ -103,7 +100,7 @@ def _scatter_to_grid(features, coords, grid_size=None, grid_mode='square_norm'):
     return feature_map, mask, (H, W), (grid_h, grid_w), c_norm
 
 
-# ---- Exact diagonal flatten / unflatten (v3) ----
+# Diagonal flatten / unflatten
 def _diagonal_flatten(fmap, direction):
     """
     Flatten a (D,H,W) feature map along the specified diagonal direction.
@@ -229,7 +226,7 @@ def _scan_direction(feature_map, direction, ssm_layers, drop_path_rate=0.0):
     return result
 
 
-# ===================== Stage 2 reordering =====================
+# Stage 2 reordering
 def _reorder_center_out(features, coords_norm, importance):
     center = (coords_norm * importance.unsqueeze(1)).sum(dim=0) / importance.sum().clamp(min=1e-6)
     dist = torch.norm(coords_norm - center.unsqueeze(0), dim=1)
@@ -256,7 +253,7 @@ def _reorder_structure_guided(features, coords, grid_h, grid_w, grid_size, impor
     return features[sorted_idx]
 
 
-# ===================== CCM main model =====================
+# Model
 class CCM_MIL(nn.Module):
     def __init__(self, in_dim, n_classes, dropout, act, survival=False,
                  stage1_dir=4, stage2_mode='center_out', soft_topk_ratio=0.3,
@@ -274,7 +271,7 @@ class CCM_MIL(nn.Module):
         self.drop_path_rate = drop_path_rate
         self.ablation_mode = ablation_mode
         self.diagonal_only = diagonal_only
-        # 'soft' 保留所有 patch(仅重排); 'hard' 截断到 top-K patch。
+        # 'soft' keeps all patches (reorder only); 'hard' truncates to the top-K patches.
         self.selection_mode = selection_mode
         self.grid_mode = grid_mode
 
@@ -298,7 +295,7 @@ class CCM_MIL(nn.Module):
         self.directions = base_dirs
         self.num_dirs = len(self.directions)
 
-        # --- Embedding ---
+        # Embedding
         fc_layers = [nn.Linear(in_dim, self.feat_dim)]
         if act.lower() == 'relu':
             fc_layers += [nn.ReLU()]
@@ -309,7 +306,7 @@ class CCM_MIL(nn.Module):
         self._fc1 = nn.Sequential(*fc_layers)
         self.embed_norm = nn.LayerNorm(self.feat_dim)
 
-        # --- Stage 1: Multi-directional Mamba2 ---
+        # Stage 1: multi-directional Mamba2
         if ablation_mode != 'no_stage1':
             self.ssm_layers = nn.ModuleList([
                 nn.ModuleList([Mamba2(d_model=self.feat_dim, d_state=64, d_conv=4, expand=2)
@@ -327,7 +324,7 @@ class CCM_MIL(nn.Module):
             self.dir_weights = None
             self.importance_head = None
 
-        # --- Stage 2: Semantic Reordering Mamba2 ---
+        # Stage 2: reordering Mamba2
         self.stage2_mamba = nn.ModuleList([
             nn.Sequential(
                 nn.LayerNorm(self.feat_dim),
@@ -337,7 +334,7 @@ class CCM_MIL(nn.Module):
         ])
         self.stage2_norm = nn.LayerNorm(self.feat_dim)
 
-        # --- Fusion & Head ---
+        # Fusion and head
         self.fusion_proj = nn.Sequential(
             nn.Linear(self.feat_dim * 2, self.feat_dim),
             nn.GELU(),
@@ -351,12 +348,12 @@ class CCM_MIL(nn.Module):
         self.norm = nn.LayerNorm(self.feat_dim)
         self.classifier = nn.Linear(self.feat_dim, n_classes)
 
-        # ===== v3.2: LSMR Logits 融合门控 (default, AMALA removed) =====
+        # LSMR logits fusion gate
         self.logits_gate = nn.Sequential(
             nn.Linear(self.feat_dim, 1),
             nn.Sigmoid()
         )
-        # 初始偏向 CCM (mean_weight ≈ 0.1)，保护其他癌种
+        # bias -2.2 gives an initial mean-path weight of ~0.1
         self.logits_gate[0].bias.data.fill_(-2.2)
 
         self.apply(initialize_weights)
@@ -465,7 +462,7 @@ class CCM_MIL(nn.Module):
         if coords is not None and coords.dim() == 3:
             coords = coords[0]  # (N, 2)
 
-        # ================== Stage 1 ==================
+        # Stage 1
         if self.ablation_mode == 'no_stage1':
             N = feats.shape[0]
             if coords is None:
@@ -496,12 +493,15 @@ class CCM_MIL(nn.Module):
             patch_importance = soft_mask[grid_h, grid_w]
             patch_importance = patch_importance / patch_importance.sum().clamp(min=1e-6)
 
+            pibar = patch_importance / patch_importance.mean().clamp(min=1e-6)
+            feats = feats * pibar.unsqueeze(1)
+
             reordered = self._select_and_reorder(
                 feats, coords, coords_norm, grid_h, grid_w, patch_importance, H)
 
             global_token = coarse_feat.mean(dim=(2, 3)).unsqueeze(1)  # (1, 1, D)
 
-        # ================== Ablation: no_stage2 ==================
+        # Ablation: no_stage2
         if self.ablation_mode == 'no_stage2':
             h_global = global_token.squeeze(1)  # (1, D)
             h_fused = self.norm(h_global)
@@ -514,7 +514,7 @@ class CCM_MIL(nn.Module):
                 return hazards, S, Y_hat, None, None
             return logits, Y_prob, Y_hat, None, None
 
-        # ================== Stage 2 (normal or no_stage1) ==================
+        # Stage 2
         seq = torch.cat([global_token, reordered.unsqueeze(0)], dim=1)  # (1, 1+N, D)
 
         for mamba_block in self.stage2_mamba:
@@ -525,28 +525,25 @@ class CCM_MIL(nn.Module):
 
         seq = self.stage2_norm(seq)
 
-        # ============================================================
-        # ===== Stage 2 Output: LSMR Logits Fusion (default) =========
-        # ============================================================
+        # Stage 2 output: LSMR logits fusion
+        h_global = seq[:, 0, :]   # (1, D) global token
+        h_seq = seq[:, 1:, :]     # (1, N, D) patch tokens
 
-        h_global = seq[:, 0, :]   # (1, D) — Stage-2 输出的全局 token
-        h_seq = seq[:, 1:, :]     # (1, N, D) — Stage-2 输出的局部 patches
-
-        # attention 聚合
+        # attention pooling
         attn_scores = self.attention(h_seq)           # (1, N, 1)
         attn_weights = F.softmax(attn_scores, dim=1)
         h_local = (h_seq * attn_weights).sum(dim=1)   # (1, D)
 
-        # 特征融合
+        # feature fusion
         h_fused = self.fusion_proj(torch.cat([h_global, h_local], dim=-1))
         h_fused = self.norm(h_fused)
 
         if self.ablation_mode == 'no_lsmr':
-            # ---------- Standard CCM path (LSMR disabled) ----------
+            # LSMR disabled
             logits = self.classifier(h_fused)         # (1, n_classes)
             mean_weight = None
         else:
-            # ---------- LSMR: logits-space residual fusion ----------
+            # LSMR: logits-space residual fusion
             # Path 1: CCM feature-space path
             logits_ccm = self.classifier(h_fused)     # (1, n_classes)
 
@@ -557,10 +554,6 @@ class CCM_MIL(nn.Module):
             # Adaptive fusion
             mean_weight = self.logits_gate(h_global)  # (1, 1), [0,1]
             logits = (1 - mean_weight) * logits_ccm + mean_weight * logits_mean
-
-        # ============================================================
-        # ===== Stage 2 Output End ===================================
-        # ============================================================
 
         Y_prob = F.softmax(logits, dim=1)
         Y_hat = torch.topk(logits, 1, dim=1)[1]
@@ -594,7 +587,7 @@ class CCM_MIL(nn.Module):
         feats = h[0]
         coords = patch_coords[0] if patch_coords is not None and patch_coords.dim() == 3 else patch_coords
 
-        # ---------------- no_stage1 branch ----------------
+        # no_stage1 branch
         if self.ablation_mode == 'no_stage1':
             N = feats.shape[0]
             if coords is None:
@@ -618,7 +611,7 @@ class CCM_MIL(nn.Module):
             h_global = seq[:, 0, :]
             h_seq = seq[:, 1:, :]
 
-            # ===== Stage 2 Output (no_stage1 branch) =====
+            # Stage 2 output
             attn_scores = self.attention(h_seq)
             attn_weights = F.softmax(attn_scores, dim=1)
             h_local = (h_seq * attn_weights).sum(dim=1)
@@ -661,13 +654,16 @@ class CCM_MIL(nn.Module):
 
             return (logits, Y_prob, Y_hat), vis_dict
 
-        # ---------------- Normal branch ----------------
+        # Normal branch
         coarse_feat, scores, mask, (grid_h, grid_w), coords_norm, feat_flat = self._scatter_and_scan(feats, coords)
         H, W = scores.shape
 
         soft_mask, probs = self._soft_topk_mask(scores, mask, ratio=self.soft_topk_ratio)
         patch_importance = soft_mask[grid_h, grid_w]
         patch_importance = patch_importance / patch_importance.sum().clamp(min=1e-6)
+
+        pibar = patch_importance / patch_importance.mean().clamp(min=1e-6)
+        feats = feats * pibar.unsqueeze(1)
 
         reordered = self._select_and_reorder(
             feats, coords, coords_norm, grid_h, grid_w, patch_importance, H)
@@ -685,7 +681,7 @@ class CCM_MIL(nn.Module):
         h_global = seq[:, 0, :]
         h_seq = seq[:, 1:, :]
 
-        # ===== Stage 2 Output (normal branch) =====
+        # Stage 2 output
         attn_scores = self.attention(h_seq)
         attn_weights = F.softmax(attn_scores, dim=1)
         h_local = (h_seq * attn_weights).sum(dim=1)
