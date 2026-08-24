@@ -2,7 +2,7 @@
 
 CCM-MIL (Coordinate-Cascade Mamba) for whole-slide image (WSI) survival analysis.
 
-This repository contains the reference implementation of the paper "CCM-MIL: Coordinate-Cascade Mamba with Spatial Topology for Whole-Slide Image Survival Analysis" (submitted to the Journal of Imaging).
+This repository contains the reference implementation of the paper "CCM-MIL: Coordinate-Cascade Mamba with Spatial Topology Modeling for Whole-Slide Image Survival Analysis" (submitted to the Journal of Imaging).
 
 ## Overview
 
@@ -181,7 +181,7 @@ If you use this code, please cite:
 
 ```bibtex
 @article{wang2026ccmmil,
-  title={CCM-MIL: Coordinate-Cascade Mamba with Spatial Topology for Whole-Slide Image Survival Analysis},
+  title={CCM-MIL: Coordinate-Cascade Mamba with Spatial Topology Modeling for Whole-Slide Image Survival Analysis},
   author={Wang, Lixiang and Zhang, Yuluan and Que, Tengcheng and Hu, Yanling},
   journal={Journal of Imaging},
   note={under review},
