@@ -2,7 +2,7 @@
 
 CCM-MIL (Coordinate-Cascade Mamba) for whole-slide image (WSI) survival analysis.
 
-This repository contains the reference implementation of the paper "CCM-MIL: Coordinate-Cascade Mamba with Spatial Topology Modeling for Whole-Slide Image Survival Analysis" (submitted to the Journal of Imaging).
+This repository contains the reference implementation of the paper "CCM-MIL: Coordinate-Cascade Mamba with Spatial Topology Modeling for Whole-Slide Image Survival Analysis" (submitted to Diagnostics).
 
 ## Overview
 
@@ -152,14 +152,14 @@ Survival: hazards = sigmoid(logits), S = cumprod(1 - hazards)
 |---|---|---|
 | `ccm_stage1_dir` | 4 | Number of scan directions (1/2/4/8) |
 | `ccm_stage2_mode` | center_out | Reordering mode (center_out / risk_gradient / structure_guided / none) |
-| `ccm_soft_topk_ratio` | 0.3 | Selection ratio; only active in the hard and straight-through variants (the default soft mode retains all tokens) |
+| `ccm_soft_topk_ratio` | 0.3 | Selection ratio; only active in the hard Top-M variant (the default soft mode retains all tokens) |
 | `ccm_stage2_layers` | 1 | Number of Mamba2 layers in Stage 2 |
 | `ccm_drop_path_rate` | 0.0 | Drop-path rate for Stage 1 |
 | `ablation_mode` | none | Ablation switch (no_stage1 / no_stage2 / no_lsmr / ... ) |
 | `drop_out` | 0.4 | Dropout rate |
 | `lr` | 1e-4 | Learning rate |
 | `reg` | 0.001 | Weight decay |
-| `max_epochs` | 100 | Maximum training epochs (early stopping patience 15) |
+| `max_epochs` | 100 | Maximum training epochs (early stopping patience 20) |
 | `seed` | 1 | Random seed (fixed per fold) |
 
 ## Ablation Modes
@@ -183,7 +183,7 @@ If you use this code, please cite:
 @article{wang2026ccmmil,
   title={CCM-MIL: Coordinate-Cascade Mamba with Spatial Topology Modeling for Whole-Slide Image Survival Analysis},
   author={Wang, Lixiang and Zhang, Yuluan and Que, Tengcheng and Hu, Yanling},
-  journal={Journal of Imaging},
+  journal={Diagnostics},
   note={under review},
   year={2026}
 }

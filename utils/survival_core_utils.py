@@ -20,7 +20,7 @@ class EarlyStopping:
     """Early stops the training if validation loss doesn't improve after a given patience."""
     '''在验证损失不再改善时提前停止训练，防止过拟合。'''
 
-    def __init__(self, warmup=5, patience=15, stop_epoch=20, verbose=False):
+    def __init__(self, warmup=5, patience=20, stop_epoch=20, verbose=False):
         """
         Args:
             patience (int): How long to wait after last time validation loss improved.
@@ -74,7 +74,7 @@ class EarlyStopping_cindex:
     逻辑: C-index 越大越好，持平不触发 counter（使用 < 而非 <=）
     '''
 
-    def __init__(self, warmup=5, patience=15, stop_epoch=20, verbose=False):
+    def __init__(self, warmup=5, patience=20, stop_epoch=20, verbose=False):
         self.warmup = warmup
         self.patience = patience
         self.stop_epoch = stop_epoch
